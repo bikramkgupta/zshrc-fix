@@ -52,7 +52,13 @@ _git_tools_root() {
 
 _git_tools_dir_for_branch() {
   local b="$1"
-  print -r -- "${b//\\//__}"
+  local root="$2"
+  local safe_b="${b//\\//__}"
+  if [[ -n "$root" ]]; then
+    print -r -- "${root:t}-${safe_b}"
+  else
+    print -r -- "$safe_b"
+  fi
 }
 
 _git_tools_default_base() {
@@ -89,146 +95,73 @@ _git_tools_parse_flags() {
 # HELP SYSTEM
 # ============================================================================
 
-typeset -Ag __GHELP
-__ghelp_add() { __GHELP["$1"]="$2"; }
-
 ghelp() {
-  local topic="${1:-all}"
+  cat <<'EOF'
+Git Tools - Power User Commands
+================================
 
-  case "$topic" in
-    all)
-      print -r -- "Git Tools - Power User Commands"
-      print -r -- "================================"
-      print -r -- "Run 'ghelp <topic>' for focused help."
-      print -r -- "Topics: core, worktree, branch, stash, rebase, remote, workflows"
-      print -r -- ""
-      print -r -- "Core Aliases"
-      print -r -- "------------"
-      local k
-      for k in ${(ok)__GHELP}; do
-        [[ "$k" == a:* ]] && print -r -- "${k#a:}|${__GHELP[$k]}"
-      done | column -t -s'|'
-      print -r -- ""
-      print -r -- "Functions (run 'ghelp <topic>' for details)"
-      print -r -- "--------------------------------------------"
-      print -r -- "gwt-*     Worktree operations"
-      print -r -- "gbr-*     Branch operations"
-      print -r -- "gremote-* Remote operations"
-      print -r -- "gst-*     Stash operations"
-      ;;
+REPO INITIALIZATION & SHIPPING:
+  gwt-ship <name> <br>   Init repo + GitHub remote + push (all-in-one)
+  gwt-init-empty <dir>   Init new local bare repo structure
+  gwt-clone-bare <url>   Clone existing repo into bare structure
+  gwt-init-bare <url>    Same as clone-bare (legacy)
 
-    core|git)
-      print -r -- "Core Git Aliases"
-      print -r -- "----------------"
-      for k in ${(ok)__GHELP}; do
-        [[ "$k" == a:* ]] && print -r -- "${k#a:}|${__GHELP[$k]}"
-      done | column -t -s'|'
-      ;;
+WORKTREE OPERATIONS:
+  gwt-new <br> [base]    Create new branch + worktree
+  gwt-newpush <br> ...   Create new branch + worktree + push
+  gwt-add <br>           Create worktree for existing branch
+  gwt-go <br>            Switch to worktree directory
+  gwt-rm <path>          Remove worktree
+  gwt-ls                 List worktrees
+  gwt-prune              Prune stale worktrees
+  gwt-sync               Fetch all + show status of all worktrees
+  gwt-rebase-all         Rebase all worktrees on main & push
+  gwt-status-all         Show status summary for all worktrees
+  gwt-lock/unlock <wt>   Lock/unlock worktree
+  gwt-repair             Repair worktree links
+  gwf / gwt-fzf          Fuzzy find worktree and switch
 
-    worktree|wt)
-      print -r -- "Worktree Commands (gwt-*)"
-      print -r -- "-------------------------"
-      for k in ${(ok)__GHELP}; do
-        [[ "$k" == f:gwt* ]] && print -r -- "${k#f:}|${__GHELP[$k]}"
-      done | column -t -s'|'
-      ;;
+BRANCH MANAGEMENT:
+  gbr-ls                 List branches (verbose)
+  gbr-merged             List merged branches
+  gbr-unmerged           List unmerged branches
+  gbr-remote             List remote branches
+  gbr-newpush <br>       Create branch and push immediately
+  gbr-track <br> [rem]   Track remote branch
+  gbr-nuke <br>          Delete branch everywhere (local+remote+worktree)
 
-    branch|br)
-      print -r -- "Branch Commands (gbr-*)"
-      print -r -- "-----------------------"
-      for k in ${(ok)__GHELP}; do
-        [[ "$k" == f:gbr* ]] && print -r -- "${k#f:}|${__GHELP[$k]}"
-      done | column -t -s'|'
-      ;;
+CORE GIT ALIASES:
+  g, gs, gss             git status (short/full)
+  gl, gll, glo           git log (graph/full/oneline)
+  ga, gaa, gap           git add (., all, patch)
+  gc, gcm                git commit (msg)
+  gca, gcan              git commit amend (no-edit)
+  gco, gsw, gswc         Checkout / switch / create switch
+  gf, gp, gP, gPu        Fetch, Pull (rebase), Push, Push upstream
+  gPf                    Force push (lease)
+  gdf, gds, gdn          Diff (unstaged, staged, name-only)
+  grh, grs, gundo        Reset (hard, soft, undo last commit)
+  gcp, gcpc, gcpa        Cherry-pick (continue, abort)
+  gsh, gshf              Show commit (stat, full)
+  grl, grlp              Reflog (pretty, short)
+  gt, gtl, gta           Tags (list, sort, annotate)
+  gclean, gclean-dry     Clean untracked files
 
-    stash|st)
-      print -r -- "Stash Commands"
-      print -r -- "--------------"
-      print -r -- "gst       git stash"
-      print -r -- "gstp      git stash pop"
-      print -r -- "gst-ls    List stashes with details"
-      print -r -- "gst-show  Show stash diff"
-      print -r -- "gst-drop  Drop stash (with confirm)"
-      print -r -- "gst-save  Save with message"
-      ;;
+REBASE & STASH:
+  grb, grbm              Rebase (on base / on main)
+  grbi, grbia            Interactive rebase (autosquash)
+  grbc, grba, grbs       Rebase continue / abort / skip
+  gst, gstp              Stash / pop
+  gst-ls, gst-show       List / show stash
+  gst-drop, gst-save     Drop / save stash
 
-    rebase|rb)
-      print -r -- "Rebase Commands"
-      print -r -- "---------------"
-      print -r -- "grb       git rebase"
-      print -r -- "grbi      Interactive rebase"
-      print -r -- "grbia     Interactive rebase with autosquash"
-      print -r -- "grbm      Rebase on main"
-      print -r -- "grbc      Continue rebase"
-      print -r -- "grba      Abort rebase"
-      print -r -- "grbs      Skip commit in rebase"
-      ;;
+REMOTES:
+  gremote-ls             List remotes
+  gremote-add <nm> <url> Add remote
+  gremote-gh <nm> <repo> Add remote from GitHub (owner/repo)
 
-    remote|rm)
-      print -r -- "Remote Commands (gremote-*)"
-      print -r -- "---------------------------"
-      for k in ${(ok)__GHELP}; do
-        [[ "$k" == f:gremote* ]] && print -r -- "${k#f:}|${__GHELP[$k]}"
-      done | column -t -s'|'
-      ;;
-
-    workflows|wf)
-      cat <<'EOF'
-Common Workflows
-================
-
-1. Start new feature (worktree):
-   gwt-new feature/my-feat origin/main
-   gwt-go feature/my-feat
-   # work, commit
-   gPu                    # push with upstream
-
-2. Start new feature (same worktree):
-   gswc feature/my-feat   # create & switch branch
-   # work, commit
-   gPu
-
-3. Review a PR locally:
-   gf                     # fetch all
-   gwt-add pr-branch      # add worktree for branch
-   gwt-go pr-branch       # cd into it
-
-4. Interactive rebase before PR:
-   gf && grb origin/main  # rebase on latest main
-   # or
-   grbi HEAD~5            # interactive rebase last 5
-
-5. Quick hotfix:
-   gwt-new hotfix/fix main
-   # fix, commit, push
-   gbr-nuke --yes hotfix/fix  # after merge
-
-6. See all worktrees at once:
-   gwt-status-all         # git status in each
-
-7. Update all worktrees:
-   gwt-sync               # fetch + show status
+Run 'ghelp' anytime to show this help.
 EOF
-      ;;
-
-    search)
-      shift
-      local query="$1"
-      [[ -z "$query" ]] && { _git_tools_err "usage: ghelp search <term>"; return 2; }
-      print -r -- "Searching for '$query'..."
-      for k in ${(ok)__GHELP}; do
-        if [[ "$k" == *"$query"* || "${__GHELP[$k]}" == *"$query"* ]]; then
-          print -r -- "${k#[af]:}|${__GHELP[$k]}"
-        fi
-      done | column -t -s'|'
-      ;;
-
-    *)
-      _git_tools_err "Unknown topic: $topic"
-      print -r -- "Topics: all, core, worktree, branch, stash, rebase, remote, workflows"
-      print -r -- "Or: ghelp search <term>"
-      ;;
-  esac
 }
 
 # ============================================================================
@@ -236,86 +169,34 @@ EOF
 # ============================================================================
 
 alias g='git'
-__ghelp_add "a:g" "Run git|g status"
-
 alias gs='git status -sb'
-__ghelp_add "a:gs" "Short status|gs"
-
 alias gss='git status'
-__ghelp_add "a:gss" "Full status|gss"
-
 alias gl='git log --oneline --decorate --graph -n 30'
-__ghelp_add "a:gl" "Graph log (30)|gl"
-
 alias gll='git log --decorate --graph'
-__ghelp_add "a:gll" "Full graph log|gll"
-
 alias glo='git log --oneline -n 20'
-__ghelp_add "a:glo" "Oneline log|glo"
-
 alias ga='git add'
-__ghelp_add "a:ga" "Stage files|ga ."
-
 alias gaa='git add -A'
-__ghelp_add "a:gaa" "Stage all|gaa"
-
 alias gap='git add -p'
-__ghelp_add "a:gap" "Stage interactively|gap"
-
 alias gc='git commit'
-__ghelp_add "a:gc" "Commit|gc"
-
 alias gcm='git commit -m'
-__ghelp_add "a:gcm" "Commit with msg|gcm \"fix: thing\""
-
 alias gca='git commit --amend'
-__ghelp_add "a:gca" "Amend commit|gca"
-
 alias gcan='git commit --amend --no-edit'
-__ghelp_add "a:gcan" "Amend no edit|gcan"
-
 alias gco='git checkout'
-__ghelp_add "a:gco" "Checkout|gco main"
-
 alias gsw='git switch'
-__ghelp_add "a:gsw" "Switch branch|gsw feature"
-
 alias gswc='git switch -c'
-__ghelp_add "a:gswc" "Create+switch|gswc feature"
-
 alias gf='git fetch --all --prune'
-__ghelp_add "a:gf" "Fetch all|gf"
-
 alias gp='git pull --rebase'
-__ghelp_add "a:gp" "Pull rebase|gp"
-
 alias gP='git push'
-__ghelp_add "a:gP" "Push|gP"
-
 alias gPu='git push -u origin HEAD'
-__ghelp_add "a:gPu" "Push+upstream|gPu"
-
 alias gPf='git push --force-with-lease'
-__ghelp_add "a:gPf" "Force push safe|gPf"
 
 # Rebase
 alias grb='git rebase'
-__ghelp_add "a:grb" "Rebase|grb main"
-
 alias grbi='git rebase -i'
-__ghelp_add "a:grbi" "Interactive rebase|grbi HEAD~5"
-
 alias grbia='git rebase -i --autosquash'
-__ghelp_add "a:grbia" "Rebase autosquash|grbia HEAD~5"
-
 alias grbc='git rebase --continue'
-__ghelp_add "a:grbc" "Continue rebase|grbc"
-
 alias grba='git rebase --abort'
-__ghelp_add "a:grba" "Abort rebase|grba"
-
 alias grbs='git rebase --skip'
-__ghelp_add "a:grbs" "Skip in rebase|grbs"
 
 # Rebase on main (auto-detect)
 grbm() {
@@ -323,89 +204,57 @@ grbm() {
   git fetch origin --prune
   git rebase "$base"
 }
-__ghelp_add "f:grbm" "Rebase on main/master|grbm"
 
 # Stash
 alias gst='git stash'
-__ghelp_add "a:gst" "Stash|gst"
-
 alias gstp='git stash pop'
-__ghelp_add "a:gstp" "Pop stash|gstp"
 
 # Enhanced stash commands
 alias gst-ls='git stash list --pretty=format:"%C(yellow)%gd%Creset %C(green)%cr%Creset %s"'
-__ghelp_add "a:gst-ls" "List stashes|gst-ls"
 
 gst-show() {
   local stash="${1:-stash@{0}}"
   git stash show -p "$stash"
 }
-__ghelp_add "f:gst-show" "Show stash diff|gst-show stash@{0}"
 
 gst-drop() {
   local stash="${1:-stash@{0}}"
   _git_tools_confirm "Drop $stash?" || return 1
   git stash drop "$stash"
 }
-__ghelp_add "f:gst-drop" "Drop stash (confirm)|gst-drop stash@{0}"
 
 gst-save() {
   local msg="$1"
   [[ -z "$msg" ]] && { _git_tools_err "usage: gst-save <message>"; return 2; }
   git stash push -m "$msg"
 }
-__ghelp_add "f:gst-save" "Stash with message|gst-save \"wip: thing\""
 
 # Diff
 alias gdf='git diff'
-__ghelp_add "a:gdf" "Diff unstaged|gdf"
-
 alias gds='git diff --staged'
-__ghelp_add "a:gds" "Diff staged|gds"
-
 alias gdn='git diff --name-only'
-__ghelp_add "a:gdn" "Diff names only|gdn"
 
 # Reset
 alias grh='git reset --hard'
-__ghelp_add "a:grh" "Hard reset|grh HEAD~1"
-
 alias grs='git reset --soft'
-__ghelp_add "a:grs" "Soft reset|grs HEAD~1"
-
 alias gundo='git reset --soft HEAD~1'
-__ghelp_add "a:gundo" "Undo last commit|gundo"
 
 # Cherry-pick
 alias gcp='git cherry-pick'
-__ghelp_add "a:gcp" "Cherry-pick|gcp <sha>"
-
 alias gcpc='git cherry-pick --continue'
-__ghelp_add "a:gcpc" "Continue cherry-pick|gcpc"
-
 alias gcpa='git cherry-pick --abort'
-__ghelp_add "a:gcpa" "Abort cherry-pick|gcpa"
 
 # Show/inspect
 alias gsh='git show --stat'
-__ghelp_add "a:gsh" "Show commit stat|gsh"
-
 alias gshf='git show'
-__ghelp_add "a:gshf" "Show full commit|gshf"
 
 # Reflog
 alias grl='git reflog --pretty=format:"%C(yellow)%h%Creset %C(green)%gd%Creset %gs %C(dim)%cr%Creset"'
-__ghelp_add "a:grl" "Reflog pretty|grl"
-
 alias grlp='git reflog show --pretty=short'
-__ghelp_add "a:grlp" "Reflog short|grlp"
 
 # Tags
 alias gt='git tag'
-__ghelp_add "a:gt" "List tags|gt"
-
 alias gtl='git tag -l --sort=-v:refname'
-__ghelp_add "a:gtl" "List tags sorted|gtl"
 
 gta() {
   local tag="$1" msg="$2"
@@ -416,7 +265,6 @@ gta() {
     git tag -a "$tag" -m "$msg"
   fi
 }
-__ghelp_add "f:gta" "Create annotated tag|gta v1.0 \"Release\""
 
 # Clean
 gclean() {
@@ -425,26 +273,17 @@ gclean() {
   _git_tools_confirm "Remove these files?" || return 1
   git clean -df
 }
-__ghelp_add "f:gclean" "Remove untracked (confirm)|gclean"
 
 alias gclean-dry='git clean -dn'
-__ghelp_add "a:gclean-dry" "Show what would clean|gclean-dry"
 
 # ============================================================================
 # BRANCH MANAGEMENT
 # ============================================================================
 
 alias gbr-ls='git branch -vv'
-__ghelp_add "a:gbr-ls" "List branches verbose|gbr-ls"
-
 alias gbr-merged='git branch --merged'
-__ghelp_add "a:gbr-merged" "List merged branches|gbr-merged"
-
 alias gbr-unmerged='git branch --no-merged'
-__ghelp_add "a:gbr-unmerged" "List unmerged branches|gbr-unmerged"
-
 alias gbr-remote='git branch -r'
-__ghelp_add "a:gbr-remote" "List remote branches|gbr-remote"
 
 gbr-newpush() {
   local branch="$1"
@@ -457,7 +296,6 @@ gbr-newpush() {
   git fetch --all --prune >/dev/null 2>&1 || true
   git switch -c "$branch" "$base" && git push -u "$remote" "$branch"
 }
-__ghelp_add "f:gbr-newpush" "New branch + push|gbr-newpush feat origin/main"
 
 gbr-track() {
   local branch="$1" remote="${2:-origin}"
@@ -479,7 +317,6 @@ gbr-track() {
   _git_tools_err "remote branch not found: $remote/$branch"
   return 2
 }
-__ghelp_add "f:gbr-track" "Track remote branch|gbr-track feature origin"
 
 gbr-nuke() {
   _git_tools_parse_flags "$@"
@@ -487,7 +324,13 @@ gbr-nuke() {
   [[ -z "$branch" ]] && { _git_tools_err "usage: gbr-nuke [--yes] [--safe|--unsafe] <branch> [remote]"; return 2; }
 
   local root="$(_git_tools_root)" || return
-  local wt_dir="$root/$(_git_tools_dir_for_branch "$branch")"
+  local wt_dir="$root/$(_git_tools_dir_for_branch "$branch" "$root")"
+
+  # Also check legacy path
+  if [[ ! -d "$wt_dir" ]]; then
+     local legacy="$root/${branch//\\//__}"
+     [[ -d "$legacy" ]] && wt_dir="$legacy"
+  fi
 
   if (( __GT_SAFE )); then
     if [[ "$branch" == "main" || "$branch" == "master" || "$branch" == "develop" ]]; then
@@ -520,14 +363,12 @@ gbr-nuke() {
     _git_tools_ok "deleted: $branch (local + $remote)"
   )
 }
-__ghelp_add "f:gbr-nuke" "Delete branch everywhere|gbr-nuke --yes feat origin"
 
 # ============================================================================
 # REMOTES
 # ============================================================================
 
 gremote-ls() { git remote -v; }
-__ghelp_add "f:gremote-ls" "List remotes|gremote-ls"
 
 gremote-add() {
   local name="$1" url="$2"
@@ -537,7 +378,6 @@ gremote-add() {
   }
   git remote add "$name" "$url" && _git_tools_ok "added remote '$name'"
 }
-__ghelp_add "f:gremote-add" "Add remote|gremote-add upstream git@..."
 
 gremote-gh() {
   local name="$1" repo="$2"
@@ -549,7 +389,6 @@ gremote-gh() {
   }
   gremote-add "$name" "$url"
 }
-__ghelp_add "f:gremote-gh" "Add remote via GH|gremote-gh upstream org/repo"
 
 # ============================================================================
 # WORKTREE OPERATIONS
@@ -559,20 +398,18 @@ gwt-ls() {
   local root="$(_git_tools_root)" || return
   (cd "$root" && git worktree list)
 }
-__ghelp_add "f:gwt-ls" "List worktrees|gwt-ls"
 
 gwt-prune() {
   local root="$(_git_tools_root)" || return
   (cd "$root" && git worktree prune && git worktree list)
 }
-__ghelp_add "f:gwt-prune" "Prune stale worktrees|gwt-prune"
 
 gwt-add() {
   local branch="$1"
   [[ -z "$branch" ]] && { _git_tools_err "usage: gwt-add <branch>"; return 2; }
 
   local root="$(_git_tools_root)" || return
-  local dir="$root/$(_git_tools_dir_for_branch "$branch")"
+  local dir="$root/$(_git_tools_dir_for_branch "$branch" "$root")"
 
   (cd "$root" || return
     if [[ -e "$dir" ]]; then _git_tools_err "path exists: $dir"; return 2; fi
@@ -587,7 +424,6 @@ gwt-add() {
     fi
   )
 }
-__ghelp_add "f:gwt-add" "Add worktree for branch|gwt-add feature"
 
 gwt-new() {
   local branch="$1"
@@ -595,14 +431,13 @@ gwt-new() {
   [[ -z "$branch" ]] && { _git_tools_err "usage: gwt-new <branch> [base]"; return 2; }
 
   local root="$(_git_tools_root)" || return
-  local dir="$root/$(_git_tools_dir_for_branch "$branch")"
+  local dir="$root/$(_git_tools_dir_for_branch "$branch" "$root")"
 
   (cd "$root" || return
     [[ -e "$dir" ]] && { _git_tools_err "path exists: $dir"; return 2; }
     git worktree add -b "$branch" "$dir" "$base"
   )
 }
-__ghelp_add "f:gwt-new" "New branch + worktree|gwt-new feature origin/main"
 
 gwt-newpush() {
   local branch="$1"
@@ -612,10 +447,9 @@ gwt-newpush() {
 
   gwt-new "$branch" "$base" || return
   local root="$(_git_tools_root)" || return
-  local dir="$root/$(_git_tools_dir_for_branch "$branch")"
+  local dir="$root/$(_git_tools_dir_for_branch "$branch" "$root")"
   git -C "$dir" push -u "$remote" "$branch"
 }
-__ghelp_add "f:gwt-newpush" "New worktree + push|gwt-newpush feature origin/main"
 
 gwt-rm() {
   local target="$1"
@@ -629,23 +463,27 @@ gwt-rm() {
     git worktree remove "$path"
   )
 }
-__ghelp_add "f:gwt-rm" "Remove worktree|gwt-rm feature__foo"
 
 gwt-go() {
   local branch="$1"
   [[ -z "$branch" ]] && { _git_tools_err "usage: gwt-go <branch>"; return 2; }
   local root="$(_git_tools_root)" || return
-  local dir="$root/$(_git_tools_dir_for_branch "$branch")"
+  local dir="$root/$(_git_tools_dir_for_branch "$branch" "$root")"
+  
+  # Support for legacy naming
+  if [[ ! -d "$dir" ]]; then
+    local legacy="$root/${branch//\\//__}"
+    if [[ -d "$legacy" ]]; then dir="$legacy"; fi
+  fi
+  
   [[ -d "$dir" ]] || { _git_tools_err "not found: $dir"; return 2; }
   cd "$dir"
 }
-__ghelp_add "f:gwt-go" "cd to worktree|gwt-go feature/foo"
 
 gwt-repair() {
   local root="$(_git_tools_root)" || return
   (cd "$root" && git worktree repair)
 }
-__ghelp_add "f:gwt-repair" "Repair worktrees|gwt-repair"
 
 gwt-lock() {
   local target="$1"
@@ -655,7 +493,6 @@ gwt-lock() {
   [[ "$path" != /* ]] && path="$root/$target"
   git worktree lock "$path"
 }
-__ghelp_add "f:gwt-lock" "Lock worktree|gwt-lock feature__foo"
 
 gwt-unlock() {
   local target="$1"
@@ -665,7 +502,6 @@ gwt-unlock() {
   [[ "$path" != /* ]] && path="$root/$target"
   git worktree unlock "$path"
 }
-__ghelp_add "f:gwt-unlock" "Unlock worktree|gwt-unlock feature__foo"
 
 gwt-sync() {
   local root="$(_git_tools_root)" || return
@@ -675,7 +511,6 @@ gwt-sync() {
   echo "Worktree status:"
   gwt-status-all
 }
-__ghelp_add "f:gwt-sync" "Fetch + status all|gwt-sync"
 
 gwt-status-all() {
   local root="$(_git_tools_root)" || return
@@ -685,7 +520,57 @@ gwt-status-all() {
     echo ""
   done
 }
-__ghelp_add "f:gwt-status-all" "Status all worktrees|gwt-status-all"
+
+gwt-rebase-all() {
+  local root="$(_git_tools_root)" || return
+  local base="origin/main"
+  
+  # Ensure we have the latest info
+  print -r -- "Fetching updates..."
+  git -C "$root/.bare" fetch --all --prune
+  
+  # Check if main/master exists in remotes
+  if ! git -C "$root/.bare" show-ref --verify --quiet "refs/remotes/$base"; then
+    base="origin/master"
+  fi
+
+  print -r -- "Propagating $base to all worktrees..."
+  print -r -- "========================================"
+
+  local worktrees
+  worktrees=("${(@f)$(git -C "$root" worktree list --porcelain | grep '^worktree' | cut -d' ' -f2)}")
+
+  for wt in $worktrees; do
+    local branch
+    branch="$(git -C "$wt" branch --show-current)"
+    [[ -z "$branch" ]] && continue
+    
+    # Skip if we are on the main branch itself
+    if [[ "$base" == *"$branch" ]]; then
+      continue
+    fi
+    
+    print -r -- "Processing: $branch ($wt)"
+    (
+      cd "$wt" || return
+      # Rebase
+      if git rebase "$base"; then
+        # Push safe force
+        if git push --force-with-lease; then
+          print -r -- "  ✓ Updated"
+        else
+          _git_tools_err "  ✗ Push failed"
+        fi
+      else
+        _git_tools_err "  ✗ Rebase failed (conflict?). Fix manually in: $wt"
+        return 1
+      fi
+    ) || return 1 # Stop on first failure
+  done
+  
+  print -r -- "========================================"
+  _git_tools_ok "All done."
+}
 
 # FZF integration for worktrees
 if command -v fzf >/dev/null 2>&1; then
@@ -697,7 +582,6 @@ if command -v fzf >/dev/null 2>&1; then
       fzf --height=40% --reverse --preview 'git -C {} status -sb') || return
     cd "$selection"
   }
-  __ghelp_add "f:gwt-fzf" "Fuzzy find worktree|gwt-fzf"
   alias gwf='gwt-fzf'
 fi
 
@@ -724,11 +608,12 @@ gwt-init-bare() {
     if git show-ref --verify --quiet refs/remotes/origin/main; then first="main"
     elif git show-ref --verify --quiet refs/remotes/origin/master; then first="master"
     fi
-    git worktree add "$first" "origin/$first" 2>/dev/null || git worktree add "$first" "$first"
+    local wt_dir
+    wt_dir="$(_git_tools_dir_for_branch "$first" "$(pwd)")"
+    git worktree add "$first" "origin/$first" 2>/dev/null || git worktree add "$wt_dir" "$first"
     _git_tools_ok "ready: $dir/$first"
   )
 }
-__ghelp_add "f:gwt-init-bare" "Clone as bare + worktree|gwt-init-bare git@... repo"
 
 gwt-init-empty() {
   _git_tools_parse_flags "$@"
@@ -754,14 +639,75 @@ gwt-init-empty() {
   git add -A && git commit -m "chore: initial commit" || return 2
 
   git clone --bare . .bare || return 2
+  
+  # CRITICAL FIX: Remove the 'origin' remote that points to the local filesystem
+  # This prevents 'gh' and other tools from getting confused by circular refs
+  git -C .bare remote remove origin 2>/dev/null
+
   rm -rf .git
   print -r -- "gitdir: ./.bare" > .git
-  git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-  git worktree add "$branch" "$branch" || return 2
 
-  _git_tools_ok "ready: $(pwd)/$branch"
+  local wt_dir
+  wt_dir="$(_git_tools_dir_for_branch "$branch" "$(pwd)")"
+  git worktree add "$wt_dir" "$branch" || return 2
+
+  _git_tools_ok "ready: $(pwd)/$wt_dir"
 }
-__ghelp_add "f:gwt-init-empty" "Init new bare repo|gwt-init-empty --yes myrepo"
+
+gwt-ship() {
+  local name="$1"
+  local branch="${2:-main}"
+  [[ -z "$name" ]] && { _git_tools_err "usage: gwt-ship <repo-name> [branch-name]"; return 2; }
+  
+  command -v gh >/dev/null 2>&1 || { _git_tools_err "gh not found. install github cli."; return 2; }
+
+  # 1. Create (or find) GitHub repo first
+  # We do this independent of local state to avoid 'gh' getting confused by worktrees
+  local repo_url
+  if gh repo view "$name" >/dev/null 2>&1; then
+    print -r -- "Repository '$name' already exists on GitHub. Using it."
+  else
+    print -r -- "Creating GitHub repository '$name'..."
+    gh repo create "$name" --private || return 1
+  fi
+  
+  # Detect user's preferred protocol (ssh vs https)
+  local proto
+  proto="$(gh config get git_protocol 2>/dev/null)"
+  if [[ "$proto" == "ssh" ]]; then
+    repo_url="$(gh repo view "$name" --json sshUrl -q .sshUrl)"
+  else
+    repo_url="$(gh repo view "$name" --json url -q .url)"
+  fi
+  
+  [[ -z "$repo_url" ]] && return 1
+
+  # 2. Initialize local repo structure
+  # This changes directory to the new repo root
+  gwt-init-empty --yes "$name" "$branch" || return 1
+  
+  # 3. Find worktree directory
+  local root="$(pwd)"
+  local wt_dir="$root/$(_git_tools_dir_for_branch "$branch" "$root")"
+  
+  if [[ ! -d "$wt_dir" ]]; then
+     _git_tools_err "could not find worktree dir: $wt_dir"
+     return 1
+  fi
+  
+  # 4. Configure remote and push
+  (cd "$wt_dir" || return 1
+    git remote add origin "$repo_url" || return 1
+    git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+
+    print -r -- "Pushing to GitHub..."
+    git push -u origin "$branch"
+  ) || return 1
+  
+  _git_tools_ok "shipped: $name ($branch) -> GitHub"
+  _git_tools_ok "  repo root: $root"
+  _git_tools_ok "  worktree:  $wt_dir"
+}
 
 gwt-clone-bare() {
   _git_tools_parse_flags "$@"
@@ -805,7 +751,6 @@ gwt-clone-bare() {
 
   _git_tools_ok "ready: $(pwd)/$branch"
 }
-__ghelp_add "f:gwt-clone-bare" "Clone existing repo as bare|gwt-clone-bare --yes git@..."
 
 # ============================================================================
 # SEARCH HELPERS
@@ -816,9 +761,7 @@ ghelp-grep() {
   [[ -z "$pat" ]] && { _git_tools_err "usage: ghelp-grep <pattern>"; return 2; }
   ghelp | command grep -i -- "$pat"
 }
-__ghelp_add "f:ghelp-grep" "Search help|ghelp-grep worktree"
 
 galiases() {
   alias | command grep -E '^(g|gs|gl|ga|gc|gco|gsw|gf|gp|gP|grb|gst|gdf|gds|grh|gcp)='
 }
-__ghelp_add "f:galiases" "List git aliases|galiases"

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a modular zsh configuration system for macOS. The main `zshrc` file acts as a minimal loader that sources all `.zsh` files from the `~/.zsh/` directory.
+Modular zsh configuration system for macOS. The main `zshrc` sources all `.zsh` files from `~/.zsh/` alphabetically.
 
 ## Deployment
 
@@ -13,36 +13,57 @@ This is a modular zsh configuration system for macOS. The main `zshrc` file acts
 ./deploy.sh --force   # Skip confirmations (still creates backups)
 ```
 
-The deploy script:
-1. Checks for additions in `~/` not present in local (warns if found)
-2. Shows diffs between local and remote files
-3. Creates timestamped backups in `~/.zsh-backup/`
-4. Copies `zshrc` to `~/.zshrc` and `.zsh/*.zsh` to `~/.zsh/`
-
-After deployment: `source ~/.zshrc`
+Creates timestamped backups in `~/.zsh-backup/`. After deployment: `source ~/.zshrc`
 
 ## Architecture
 
 ```
-zshrc                    # Main loader - sources all .zsh files alphabetically
+zshrc                    # Loader + Homebrew + completions + starship + zsh plugins
 .zsh/
   docker-tools.zsh       # Docker/Compose aliases (dkps, dc, dcu, etc.)
-  extras.zsh             # PATH exports, NVM, FZF config, misc helpers
+  extras.zsh             # PATH exports, NVM, FZF config, Python venv helpers
   git-tools.zsh          # Git/worktree power-user commands (gwt-*, gbr-*, etc.)
-  hunt.zsh               # Unified search command using fd/rg/fzf
+  hunt.zsh               # Unified search using fd/rg/fzf
 ```
 
-## Key Commands Provided
+## Help Commands
 
-- `ghelp` / `ghelp workflows` - Git/worktree command reference
+- `ghelp` - Git/worktree command reference
 - `dkhelp` - Docker command reference
 - `hunt -h` - Search command help
 
 ## Worktree Layout Convention
 
-Git worktree commands (`gwt-*`) expect repos to use a bare repository layout with `.bare/` at the repo root. Branch worktrees are created as sibling directories (e.g., `repo/main/`, `repo/feature__foo/`).
+Git worktree commands (`gwt-*`) use a bare repository layout:
+- `.bare/` directory at repo root contains the actual git data
+- `.git` file (not directory) points to `.bare/`
+- Worktrees are sibling directories named `{repo}-{branch}` (slashes become `__`)
+
+Example: `gwt-ship myproject main` creates:
+```
+myproject/
+  .bare/           # Bare git repo
+  .git             # File containing "gitdir: ./.bare"
+  myproject-main/  # Worktree for main branch
+```
+
+## Key Functions
+
+**Repo initialization:**
+- `gwt-ship <name> <branch>` - Create repo + GitHub remote + push (all-in-one)
+- `gwt-clone-bare <url>` - Clone existing repo into bare structure
+
+**Worktree ops:**
+- `gwt-new <branch> [base]` - New branch + worktree
+- `gwt-go <branch>` - cd to worktree
+- `gwf` / `gwt-fzf` - Fuzzy find and switch worktree
+
+**Search:**
+- `hunt "*.py"` - Find files by name
+- `hunt -c "pattern"` - Search file contents
+- `hunt -i "*.tsx"` - Interactive mode with fzf preview
 
 ## Dependencies
 
 Required: `fd`, `rg` (ripgrep)
-Optional: `fzf`, `bat`, `eza`, `starship`
+Optional: `fzf`, `bat`, `eza`, `starship`, `gh` (GitHub CLI for gwt-ship)
