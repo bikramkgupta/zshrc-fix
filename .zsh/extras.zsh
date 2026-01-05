@@ -1,6 +1,12 @@
 # extras.zsh - PATH exports, tools configuration
 # Source this file from ~/.zshrc
 
+# Aliases
+alias claude2='claude --dangerously-skip-permissions'
+alias gemini2='gemini --yolo'
+alias codex2='codex --dangerously-bypass-approvals-and-sandbox'
+
+
 # ============================================================================
 # PATH EXPORTS
 # ============================================================================
@@ -70,13 +76,7 @@ if command -v fzf >/dev/null 2>&1; then
   fi
 
   # FZF options
-  export FZF_DEFAULT_OPTS='
-    --height=40%
-    --layout=reverse
-    --border
-    --info=inline
-    --bind=ctrl-d:half-page-down,ctrl-u:half-page-up
-  '
+  export FZF_DEFAULT_OPTS='--height=40% --layout=reverse --border --info=inline --bind=ctrl-d:half-page-down,ctrl-u:half-page-up'
 
   # Load fzf keybindings and completion
   [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
@@ -113,5 +113,83 @@ peek() {
     bat --style=numbers --color=always "$@"
   else
     cat "$@"
+  fi
+}
+
+# ============================================================================
+# DIGITALOCEAN CLEANUP
+# ============================================================================
+
+# Delete all DigitalOcean apps matching a pattern
+do-app-clean() {
+  local pattern="$1"
+  if [[ -z "$pattern" ]]; then
+    echo "Usage: do-app-clean <pattern>"
+    echo "Example: do-app-clean 'validate-*'"
+    return 1
+  fi
+
+  echo "Finding apps matching: $pattern"
+  local matches=$(doctl apps list --format ID,Spec.Name --no-header | grep -E "$pattern")
+
+  if [[ -z "$matches" ]]; then
+    echo "No apps found matching: $pattern"
+    return 0
+  fi
+
+  echo "\nApps to delete:"
+  echo "$matches" | while read -r id name; do
+    echo "  - $name ($id)"
+  done
+
+  echo ""
+  read -q "confirm?Delete these apps? [y/N] "
+  echo ""
+
+  if [[ "$confirm" == "y" ]]; then
+    echo "$matches" | while read -r id name; do
+      echo "Deleting: $name..."
+      doctl apps delete "$id" --force
+    done
+    echo "Done!"
+  else
+    echo "Cancelled."
+  fi
+}
+
+# Delete all DigitalOcean databases matching a pattern
+do-db-clean() {
+  local pattern="$1"
+  if [[ -z "$pattern" ]]; then
+    echo "Usage: do-db-clean <pattern>"
+    echo "Example: do-db-clean 'validate-*'"
+    return 1
+  fi
+
+  echo "Finding databases matching: $pattern"
+  local matches=$(doctl database list --format ID,Name --no-header | grep -E "$pattern")
+
+  if [[ -z "$matches" ]]; then
+    echo "No databases found matching: $pattern"
+    return 0
+  fi
+
+  echo "\nDatabases to delete:"
+  echo "$matches" | while read -r id name; do
+    echo "  - $name ($id)"
+  done
+
+  echo ""
+  read -q "confirm?Delete these databases? [y/N] "
+  echo ""
+
+  if [[ "$confirm" == "y" ]]; then
+    echo "$matches" | while read -r id name; do
+      echo "Deleting: $name..."
+      doctl database delete "$id" --force
+    done
+    echo "Done!"
+  else
+    echo "Cancelled."
   fi
 }

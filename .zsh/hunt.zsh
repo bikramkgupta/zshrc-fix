@@ -8,7 +8,7 @@ function hunt {
   local mode="name"
   local output="files"
   local interactive=0
-  local all=0
+  local list_only=0
 
   local EXCLUDES=(
     node_modules .git .venv venv __pycache__
@@ -17,14 +17,14 @@ function hunt {
     .DS_Store Thumbs.db
   )
 
-  while getopts "ncdfiagh" opt; do
+  while getopts "ncdfilgh" opt; do
     case "$opt" in
       n) mode="name" ;;
       c) mode="content" ;;
       d) output="dirs" ;;
       f) output="files" ;;
       i) interactive=1 ;;
-      a) all=1 ;;
+      l) list_only=1 ;;
       g) ;;
       h)
         cat <<'EOF'
@@ -35,40 +35,36 @@ USAGE:
 
 FLAGS:
   -n    Name search (default) - find files by name pattern
-  -c    Content search - find files containing pattern
+  -c    Content search - show matching lines with file:line:content
+  -l    List mode - only show filenames (for -c), no match content
   -d    Directory mode - show parent directories of matches
   -f    File mode (default) - show matching files
   -i    Interactive - use fzf for selection
-  -a    Include all files (no excludes, show hidden)
   -h    Show this help
 
 EXAMPLES:
   # --- File Name Search ---
   hunt "*.py"              # Find all Python files
-  hunt -n "*.json"         # Explicit name mode
   hunt "config*.yaml"      # Find config files
-  hunt "*.ts" src          # Find .ts files ONLY in 'src' folder
+  hunt "*.ts" src          # Find .ts files in src/
 
-  # --- Content Search ---
-  hunt -c "password"       # Find "password" inside files
-  hunt -c "API_KEY"        # Look for string "API_KEY"
-  hunt -c "user_id ="      # Look for variable assignment
-  hunt -c "_TOKEN" "*.env" # Search for token ONLY in .env files
+  # --- Content Search (shows file:line:match) ---
+  hunt -c "API_KEY"        # Find API_KEY with context
+  hunt -c "TODO" "*.py"    # Find TODOs in Python files
+  hunt -c "SECRET" "*.env" # Search in .env files (hidden/ignored included)
+
+  # --- List Files Only ---
+  hunt -c -l "password"    # Just list files containing "password"
 
   # --- Directory Mode ---
-  hunt -d "*.py"           # List FOLDERS that contain Python files
-  hunt -d "config"         # List FOLDERS containing a file named "config"
+  hunt -d "*.py"           # List folders containing Python files
 
   # --- Interactive (FZF) ---
-  hunt -i "*.tsx"          # Find React components -> select to open
-  hunt -c "TODO" -i        # Find TODOs -> preview code snippet
-  hunt -c error -i         # Find "error" -> preview code snippet
+  hunt -i "*.tsx"          # Find React components -> select
+  hunt -c -i "TODO"        # Find TODOs -> preview matches
 
-EXCLUDED DIRECTORIES:
-  node_modules, .git, .venv, venv, __pycache__, dist, build,
-  .next, .cache, .idea, .vscode, coverage, .mypy_cache, etc.
-
-  Use -a flag to include all files (no excludes).
+NOTE: Hidden and gitignored files are searched by default.
+      Common junk dirs (node_modules, .git, etc.) are excluded.
 
 DEPENDENCIES:
   Required: fd (file finder), rg (content search)
@@ -104,8 +100,7 @@ EOF
 
   # ---------- NAME SEARCH ----------
   if [[ "$mode" == "name" ]]; then
-    cmd=(fd -g "$pattern")
-    [[ "$all" -eq 1 ]] && cmd+=(--no-ignore --hidden)
+    cmd=(fd -g "$pattern" --no-ignore --hidden)
     for e in "${EXCLUDES[@]}"; do
       cmd+=(--exclude "$e")
     done
@@ -118,8 +113,12 @@ EOF
 
   # ---------- CONTENT SEARCH ----------
   if [[ "$mode" == "content" ]]; then
-    cmd=(rg -i --files-with-matches --no-messages "$pattern")
-    [[ "$all" -eq 1 ]] && cmd+=(--no-ignore --hidden)
+    if [[ "$list_only" -eq 1 ]]; then
+      cmd=(rg -i --files-with-matches --no-messages "$pattern")
+    else
+      cmd=(rg -i -n --heading --color=always --no-messages "$pattern")
+    fi
+    cmd+=(--no-ignore --hidden)
 
     for e in "${EXCLUDES[@]}"; do
       cmd+=(--glob "!$e")
@@ -146,12 +145,17 @@ EOF
   if [[ "$interactive" -eq 1 ]]; then
     local preview_cmd
     if [[ "$mode" == "content" ]]; then
-      # Show matching lines with context
-      if command -v bat >/dev/null; then
-        preview_cmd="rg -i --color=always -C 3 '$pattern' {} | head -50"
-      else
-        preview_cmd="rg -i --color=always -C 3 '$pattern' {}"
+      # For interactive, always get file list for selection
+      local file_cmd=(rg -i --files-with-matches --no-messages --no-ignore --hidden "$pattern")
+      for e in "${EXCLUDES[@]}"; do
+        file_cmd+=(--glob "!$e")
+      done
+      if [[ -n "$filter" ]]; then
+        file_cmd+=(--glob "$filter")
       fi
+      # Show matching lines with context in preview
+      preview_cmd="rg -i --color=always -n -C 2 '$pattern' {} | head -50"
+      "${file_cmd[@]}" | fzf --preview "$preview_cmd" --preview-window=right:60%
     else
       # Show file contents
       if command -v bat >/dev/null; then
@@ -159,8 +163,8 @@ EOF
       else
         preview_cmd='head -100 {}'
       fi
+      "${cmd[@]}" | fzf --preview "$preview_cmd" --preview-window=right:60%
     fi
-    "${cmd[@]}" | fzf --preview "$preview_cmd" --preview-window=right:60%
   else
     "${cmd[@]}"
   fi
@@ -170,6 +174,7 @@ EOF
 alias hunt='noglob hunt'
 
 # Quick shortcuts
-alias hc='hunt -c'   # Content search
-alias hi='hunt -i'   # Interactive name search
+alias hc='hunt -c'      # Content search (shows matches)
+alias hcl='hunt -c -l'  # Content search (list files only)
+alias hi='hunt -i'      # Interactive name search
 alias hci='hunt -c -i'  # Interactive content search

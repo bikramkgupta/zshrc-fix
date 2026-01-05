@@ -66,4 +66,4 @@ fi
 # WELCOME MESSAGE
 # ============================================================================
 
-echo "When you need something, use ghelp, dkhelp, or hunt -h to discover the command. Everything's documented there."
+printf "\n  \033[1mghelp\033[0m git/worktree  •  \033[1mdkhelp\033[0m docker  •  \033[1mhunt -h\033[0m search  •  \033[1mclaude-session-analyzer\033[0m sessions\n\n"

@@ -1,12 +1,12 @@
 #!/bin/bash
-# deploy.sh - Deploy zshrc configuration to home directory
+# deploy.sh - Deploy shell-kit configuration to home directory
 # Usage: ./deploy.sh [--force]
 #
 # This script:
 # 1. Checks for additions in remote (~/) not present in local
 # 2. Shows diffs between local and remote files
 # 3. Creates timestamped backups before overwriting
-# 4. Copies all configuration files
+# 4. Copies all configuration files (zsh + claude)
 
 set -e
 
@@ -172,6 +172,141 @@ deploy_files() {
 }
 
 # ============================================================================
+# CLAUDE SETTINGS DEPLOYMENT
+# ============================================================================
+
+LOCAL_CLAUDE_DIR="$SCRIPT_DIR/.claude"
+HOME_CLAUDE_DIR="$HOME/.claude"
+CLAUDE_BACKUP_DIR="$HOME/.claude-backup/$(date +%Y%m%d_%H%M%S)"
+
+backup_claude_settings() {
+  # Only backup if there are existing settings
+  if [[ -f "$HOME_CLAUDE_DIR/settings.json" ]] || [[ -f "$HOME_CLAUDE_DIR/CLAUDE.md" ]]; then
+    echo -e "${YELLOW}Backing up existing Claude settings...${NC}"
+    mkdir -p "$CLAUDE_BACKUP_DIR"
+
+    # Backup core config files only (not transient data)
+    for f in CLAUDE.md settings.json statusline.sh; do
+      [[ -f "$HOME_CLAUDE_DIR/$f" ]] && cp "$HOME_CLAUDE_DIR/$f" "$CLAUDE_BACKUP_DIR/"
+    done
+    [[ -d "$HOME_CLAUDE_DIR/hooks" ]] && cp -r "$HOME_CLAUDE_DIR/hooks" "$CLAUDE_BACKUP_DIR/"
+    [[ -d "$HOME_CLAUDE_DIR/commands" ]] && cp -r "$HOME_CLAUDE_DIR/commands" "$CLAUDE_BACKUP_DIR/"
+    [[ -d "$HOME_CLAUDE_DIR/tools" ]] && cp -r "$HOME_CLAUDE_DIR/tools" "$CLAUDE_BACKUP_DIR/"
+
+    echo -e "  ${GREEN}Backup saved to:${NC} $CLAUDE_BACKUP_DIR"
+    echo ""
+  fi
+}
+
+deploy_claude_settings() {
+  [[ -d "$LOCAL_CLAUDE_DIR" ]] || return 0
+
+  # Backup existing settings first
+  backup_claude_settings
+
+  echo -e "${YELLOW}Deploying Claude settings...${NC}"
+
+  mkdir -p "$HOME_CLAUDE_DIR"/{hooks,commands,tools}
+
+  # Core files
+  for f in CLAUDE.md settings.json statusline.sh; do
+    if [[ -f "$LOCAL_CLAUDE_DIR/$f" ]]; then
+      cp "$LOCAL_CLAUDE_DIR/$f" "$HOME_CLAUDE_DIR/"
+      echo -e "  ${GREEN}Deployed:${NC} ~/.claude/$f"
+    fi
+  done
+
+  # Hooks
+  for f in "$LOCAL_CLAUDE_DIR/hooks"/*.sh; do
+    if [[ -f "$f" ]]; then
+      cp "$f" "$HOME_CLAUDE_DIR/hooks/"
+      chmod +x "$HOME_CLAUDE_DIR/hooks/$(basename "$f")"
+      echo -e "  ${GREEN}Deployed:${NC} ~/.claude/hooks/$(basename "$f")"
+    fi
+  done
+
+  # Commands
+  if [[ -d "$LOCAL_CLAUDE_DIR/commands" ]]; then
+    for f in "$LOCAL_CLAUDE_DIR/commands"/*; do
+      [[ -f "$f" ]] && cp "$f" "$HOME_CLAUDE_DIR/commands/"
+    done
+    echo -e "  ${GREEN}Deployed:${NC} ~/.claude/commands/"
+  fi
+
+  # Tools (recursive copy)
+  if [[ -d "$LOCAL_CLAUDE_DIR/tools" ]]; then
+    cp -r "$LOCAL_CLAUDE_DIR/tools/"* "$HOME_CLAUDE_DIR/tools/" 2>/dev/null || true
+    # Ensure scripts are executable
+    chmod +x "$HOME_CLAUDE_DIR/tools/session-analyzer/analyze.sh" 2>/dev/null || true
+    chmod +x "$HOME_CLAUDE_DIR/tools/session-analyzer/parser.py" 2>/dev/null || true
+    echo -e "  ${GREEN}Deployed:${NC} ~/.claude/tools/"
+  fi
+
+  # Create symlink for session-analyzer CLI
+  mkdir -p "$HOME/.local/bin"
+  local analyzer="$HOME_CLAUDE_DIR/tools/session-analyzer/analyze.sh"
+  if [[ -f "$analyzer" ]]; then
+    ln -sf "$analyzer" "$HOME/.local/bin/claude-session-analyzer"
+    echo -e "  ${GREEN}Symlinked:${NC} claude-session-analyzer -> ~/.local/bin/"
+  fi
+
+  echo ""
+}
+
+# ============================================================================
+# CODEX SETTINGS DEPLOYMENT
+# ============================================================================
+
+LOCAL_CODEX_DIR="$SCRIPT_DIR/.codex"
+HOME_CODEX_DIR="$HOME/.codex"
+CODEX_BACKUP_DIR="$HOME/.codex-backup/$(date +%Y%m%d_%H%M%S)"
+
+backup_codex_settings() {
+  if [[ -f "$HOME_CODEX_DIR/config.toml" ]]; then
+    echo -e "${YELLOW}Backing up existing Codex settings...${NC}"
+    mkdir -p "$CODEX_BACKUP_DIR"
+    [[ -f "$HOME_CODEX_DIR/config.toml" ]] && cp "$HOME_CODEX_DIR/config.toml" "$CODEX_BACKUP_DIR/"
+    [[ -d "$HOME_CODEX_DIR/tools" ]] && cp -r "$HOME_CODEX_DIR/tools" "$CODEX_BACKUP_DIR/"
+    echo -e "  ${GREEN}Backup saved to:${NC} $CODEX_BACKUP_DIR"
+    echo ""
+  fi
+}
+
+deploy_codex_settings() {
+  [[ -d "$LOCAL_CODEX_DIR" ]] || return 0
+
+  backup_codex_settings
+
+  echo -e "${YELLOW}Deploying Codex settings...${NC}"
+
+  mkdir -p "$HOME_CODEX_DIR/tools"
+
+  # Config file
+  if [[ -f "$LOCAL_CODEX_DIR/config.toml" ]]; then
+    cp "$LOCAL_CODEX_DIR/config.toml" "$HOME_CODEX_DIR/"
+    echo -e "  ${GREEN}Deployed:${NC} ~/.codex/config.toml"
+  fi
+
+  # Tools (recursive copy)
+  if [[ -d "$LOCAL_CODEX_DIR/tools" ]]; then
+    cp -r "$LOCAL_CODEX_DIR/tools/"* "$HOME_CODEX_DIR/tools/" 2>/dev/null || true
+    chmod +x "$HOME_CODEX_DIR/tools/session-analyzer/analyze.sh" 2>/dev/null || true
+    chmod +x "$HOME_CODEX_DIR/tools/session-analyzer/parser.py" 2>/dev/null || true
+    echo -e "  ${GREEN}Deployed:${NC} ~/.codex/tools/"
+  fi
+
+  # Symlink for session-analyzer CLI
+  mkdir -p "$HOME/.local/bin"
+  local analyzer="$HOME_CODEX_DIR/tools/session-analyzer/analyze.sh"
+  if [[ -f "$analyzer" ]]; then
+    ln -sf "$analyzer" "$HOME/.local/bin/codex-session-analyzer"
+    echo -e "  ${GREEN}Symlinked:${NC} codex-session-analyzer -> ~/.local/bin/"
+  fi
+
+  echo ""
+}
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -204,10 +339,11 @@ else
 fi
 echo ""
 
-# Show diffs
-if ! show_diffs; then
-  echo -e "${GREEN}No differences found. Nothing to deploy.${NC}"
-  exit 0
+# Show diffs (capture result without triggering set -e)
+if show_diffs; then
+  has_zsh_diff=0
+else
+  has_zsh_diff=1
 fi
 
 # Confirm deployment
@@ -222,17 +358,26 @@ if [[ $FORCE -eq 0 ]]; then
 fi
 
 # Create backups and deploy
-create_backups
-deploy_files
+if [[ $has_zsh_diff -eq 0 ]]; then
+  create_backups
+  deploy_files
+fi
+deploy_claude_settings
+deploy_codex_settings
 
 echo -e "${GREEN}=== Deployment complete! ===${NC}"
 echo ""
-echo "Backups saved to: $BACKUP_DIR"
+echo "Backups saved to:"
+echo "  Zsh:    $BACKUP_DIR"
+[[ -d "$CLAUDE_BACKUP_DIR" ]] && echo "  Claude: $CLAUDE_BACKUP_DIR"
+[[ -d "$CODEX_BACKUP_DIR" ]] && echo "  Codex:  $CODEX_BACKUP_DIR"
 echo ""
 echo "To activate, run:"
 echo "  source ~/.zshrc"
 echo ""
 echo "Quick help:"
-echo "  ghelp    - Git commands"
-echo "  dkhelp   - Docker commands"
-echo "  hunt -h  - Search commands"
+echo "  ghelp                    - Git commands"
+echo "  dkhelp                   - Docker commands"
+echo "  hunt -h                  - Search commands"
+echo "  claude-session-analyzer  - Analyze Claude sessions"
+echo "  codex-session-analyzer   - Analyze Codex sessions"

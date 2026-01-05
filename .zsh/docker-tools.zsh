@@ -2,6 +2,15 @@
 # Run 'dkhelp' for available commands
 
 # ============================================================================
+# HELPERS
+# ============================================================================
+
+_docker_tools_show_help() {
+  case "$1" in -h|--help) printf '%s\n' "$2"; return 0 ;; esac
+  return 1
+}
+
+# ============================================================================
 # HELP SYSTEM
 # ============================================================================
 
@@ -150,6 +159,24 @@ alias dklogst='docker logs -f -t'
 
 # Execute shell in container
 dkexec() {
+  _docker_tools_show_help "$1" 'dkexec - Execute interactive shell in a running container
+
+USAGE:
+  dkexec <container>
+
+ARGUMENTS:
+  container   Container ID or name (required)
+
+EXAMPLE:
+  dkexec my-app           # Open shell in container named my-app
+  dkexec abc123           # Open shell in container by ID
+  dkexec $(dkps -q | head -1)  # Open shell in first running container
+
+NOTES:
+  - Tries bash first, falls back to sh if bash unavailable
+  - Use dkshf for fuzzy-find selection with fzf
+  - Alias: dksh' && return 0
+
   local container="$1"
   [[ -z "$container" ]] && echo "Usage: dkexec <container>" && return 1
 
@@ -364,6 +391,24 @@ dcls() {
 
 # Compose exec with shell (auto-detects bash/sh)
 dcsh() {
+  _docker_tools_show_help "$1" 'dcsh - Execute shell in docker compose service
+
+USAGE:
+  dcsh [service]
+
+ARGUMENTS:
+  service   Service name (optional if only one service running)
+
+EXAMPLE:
+  dcsh web              # Open shell in web service
+  dcsh                  # Auto-detect if only one service running
+  dcsh api              # Open shell in api service
+
+NOTES:
+  - Auto-detects service if only one is running
+  - Tries bash first, falls back to sh if bash unavailable
+  - Must be run from directory with docker-compose.yml' && return 0
+
   local service="$1"
   if [[ -z "$service" ]]; then
     # Try to auto-detect if only one service is running

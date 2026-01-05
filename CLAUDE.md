@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Modular zsh configuration system for macOS. The main `zshrc` sources all `.zsh` files from `~/.zsh/` alphabetically.
+**shell-kit** - Modular zsh configuration + Claude Code settings for macOS. Deploys both shell tools and Claude Code configuration.
 
 ## Deployment
 
@@ -13,7 +13,12 @@ Modular zsh configuration system for macOS. The main `zshrc` sources all `.zsh` 
 ./deploy.sh --force   # Skip confirmations (still creates backups)
 ```
 
-Creates timestamped backups in `~/.zsh-backup/`. After deployment: `source ~/.zshrc`
+Creates timestamped backups:
+- Zsh: `~/.zsh-backup/YYYYMMDD_HHMMSS/`
+- Claude: `~/.claude-backup/YYYYMMDD_HHMMSS/`
+- Codex: `~/.codex-backup/YYYYMMDD_HHMMSS/`
+
+After deployment: `source ~/.zshrc`
 
 ## Architecture
 
@@ -24,6 +29,16 @@ zshrc                    # Loader + Homebrew + completions + starship + zsh plug
   extras.zsh             # PATH exports, NVM, FZF config, Python venv helpers
   git-tools.zsh          # Git/worktree power-user commands (gwt-*, gbr-*, etc.)
   hunt.zsh               # Unified search using fd/rg/fzf
+.claude/
+  CLAUDE.md              # Personal defaults for all projects
+  settings.json          # Permissions, hooks, statusline config
+  statusline.sh          # Custom status bar script
+  hooks/                 # Session logging hooks
+  commands/              # Custom command definitions (e.g., squash-commits)
+  tools/session-analyzer/ # Session analysis tool
+.codex/
+  config.toml            # Codex CLI settings (model, trust levels)
+  tools/session-analyzer/ # Session analysis tool for Codex
 ```
 
 ## Help Commands
@@ -31,6 +46,12 @@ zshrc                    # Loader + Homebrew + completions + starship + zsh plug
 - `ghelp` - Git/worktree command reference
 - `dkhelp` - Docker command reference
 - `hunt -h` - Search command help
+- `claude-session-analyzer --help` - Claude session analysis tool
+- `codex-session-analyzer --help` - Codex session analysis tool
+
+Most functions also support `--help` flag:
+- `gwt-ship --help`, `gwt-new --help`, `gwt-go --help`, `gwt-clone-bare --help`
+- `dkexec --help`, `dcsh --help`
 
 ## Worktree Layout Convention
 
@@ -62,6 +83,16 @@ myproject/
 - `hunt "*.py"` - Find files by name
 - `hunt -c "pattern"` - Search file contents
 - `hunt -i "*.tsx"` - Interactive mode with fzf preview
+
+**Claude tools:**
+- `claude-session-analyzer --list` - List all sessions
+- `claude-session-analyzer --latest --open` - View latest session trace
+- `claude-session-analyzer --latest --digest` - Markdown digest for session continuation
+
+**Codex tools:**
+- `codex-session-analyzer --list` - List all sessions
+- `codex-session-analyzer --latest --open` - View latest session trace
+- `codex-session-analyzer --latest --digest` - Markdown digest for session continuation
 
 ## Dependencies
 

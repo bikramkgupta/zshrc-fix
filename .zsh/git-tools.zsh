@@ -11,6 +11,11 @@ setopt NO_NOMATCH 2>/dev/null
 _git_tools_err() { print -r -- "git-tools: $*" >&2; }
 _git_tools_ok()  { print -r -- "$*"; }
 
+_git_tools_show_help() {
+  case "$1" in -h|--help) printf '%s\n' "$2"; return 0 ;; esac
+  return 1
+}
+
 _git_tools_confirm() {
   local prompt="${1:-Continue?}"
   local reply
@@ -426,6 +431,25 @@ gwt-add() {
 }
 
 gwt-new() {
+  _git_tools_show_help "$1" 'gwt-new - Create new branch + worktree
+
+USAGE:
+  gwt-new <branch> [base]
+
+ARGUMENTS:
+  branch    New branch name (required)
+  base      Base ref to branch from (default: origin/main or origin/master)
+
+EXAMPLE:
+  gwt-new feature/auth           # Branch from default base
+  gwt-new fix/bug-123 v2.0.0     # Branch from tag
+  gwt-new hotfix develop         # Branch from develop
+
+NOTES:
+  - Must be run from within a worktree or repo with .bare/ structure
+  - Creates directory: {repo}-{branch} (slashes become __)
+  - Example: gwt-new feature/login creates myrepo-feature__login/' && return 0
+
   local branch="$1"
   local base="${2:-$(_git_tools_default_base)}"
   [[ -z "$branch" ]] && { _git_tools_err "usage: gwt-new <branch> [base]"; return 2; }
@@ -465,6 +489,23 @@ gwt-rm() {
 }
 
 gwt-go() {
+  _git_tools_show_help "$1" 'gwt-go - Switch to worktree directory
+
+USAGE:
+  gwt-go <branch>
+
+ARGUMENTS:
+  branch    Branch name of the worktree to switch to
+
+EXAMPLE:
+  gwt-go main              # Switch to main worktree
+  gwt-go feature/auth      # Switch to feature branch worktree
+
+NOTES:
+  - Changes current directory to the worktree
+  - Use gwf (gwt-fzf) for interactive selection with fzf
+  - Supports both new naming (repo-branch) and legacy naming' && return 0
+
   local branch="$1"
   [[ -z "$branch" ]] && { _git_tools_err "usage: gwt-go <branch>"; return 2; }
   local root="$(_git_tools_root)" || return
@@ -655,6 +696,25 @@ gwt-init-empty() {
 }
 
 gwt-ship() {
+  _git_tools_show_help "$1" 'gwt-ship - Initialize repo + GitHub remote + push (all-in-one)
+
+USAGE:
+  gwt-ship <repo-name> [branch]
+
+ARGUMENTS:
+  repo-name   Name for the new repository (required)
+  branch      Initial branch name (default: main)
+
+EXAMPLE:
+  gwt-ship myproject main    # Creates myproject with main branch, pushes to GitHub
+  gwt-ship api-server        # Creates api-server with default main branch
+
+NOTES:
+  - Requires GitHub CLI (gh) to be installed and authenticated
+  - Creates a private repository by default
+  - Uses bare repository layout with worktrees
+  - Creates directory structure: myproject/.bare/ + myproject/myproject-main/' && return 0
+
   local name="$1"
   local branch="${2:-main}"
   [[ -z "$name" ]] && { _git_tools_err "usage: gwt-ship <repo-name> [branch-name]"; return 2; }
@@ -710,6 +770,31 @@ gwt-ship() {
 }
 
 gwt-clone-bare() {
+  _git_tools_show_help "$1" 'gwt-clone-bare - Clone existing repo into bare structure
+
+USAGE:
+  gwt-clone-bare [--yes] [--safe|--unsafe] <url> [dir] [branch]
+
+ARGUMENTS:
+  url       Git repository URL (required)
+  dir       Target directory (default: derived from URL)
+  branch    Initial branch to checkout (default: main)
+
+FLAGS:
+  --yes     Skip confirmation prompts
+  --safe    Require empty directory (default)
+  --unsafe  Allow non-empty directory
+
+EXAMPLE:
+  gwt-clone-bare git@github.com:user/repo.git
+  gwt-clone-bare https://github.com/user/repo.git myrepo
+  gwt-clone-bare --yes git@github.com:user/repo.git . main
+
+NOTES:
+  - Creates .bare/ directory with bare clone
+  - Sets up proper fetch refspec for all branches
+  - Creates initial worktree for specified branch' && return 0
+
   _git_tools_parse_flags "$@"
   local url="${__GT_ARGS[1]}" dir="${__GT_ARGS[2]}" branch="${__GT_ARGS[3]:-main}"
   [[ -z "$url" ]] && { _git_tools_err "usage: gwt-clone-bare [--yes] <url> [dir] [branch]"; return 2; }

@@ -1,0 +1,30 @@
+model = "gpt-5.2-codex"
+model_reasoning_effort = "high"
+[projects."/workspaces/app"]
+trust_level = "untrusted"
+
+[projects."/Users/bikram/Documents/Build/demo-agentic-onboarding/devcontainer"]
+trust_level = "trusted"
+
+[projects."/Users/bikram/Documents/Build/demo-agentic-onboarding/remote-container"]
+trust_level = "trusted"
+
+[projects."/Users/bikram/Documents/Build/AppPlat-Demo-AI-assisted-e2e"]
+trust_level = "trusted"
+
+[projects."/Users/bikram/Documents/Build/mac-clipboard-image-to-path"]
+trust_level = "trusted"
+
+[projects."/Users/bikram/Documents/Build/do-app-platform-skills"]
+trust_level = "trusted"
+
+[projects."/Users/bikram/.codex"]
+trust_level = "untrusted"
+
+[notice]
+"hide_gpt-5.1-codex-max_migration_prompt" = true
+
+[notice.model_migrations]
+"gpt-5.1-codex-max" = "gpt-5.2-codex"
+
+[features]
