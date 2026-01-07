@@ -17,6 +17,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Dependencies required for full shell experience
+BREW_DEPS=(starship zsh-autosuggestions zsh-syntax-highlighting fd ripgrep)
+
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOME_ZSHRC="$HOME/.zshrc"
@@ -172,6 +175,57 @@ deploy_files() {
 }
 
 # ============================================================================
+# HOMEBREW DEPENDENCIES
+# ============================================================================
+
+install_dependencies() {
+  # Check if Homebrew is available
+  if ! command -v brew >/dev/null 2>&1; then
+    echo -e "${RED}Homebrew not found. Please install Homebrew first:${NC}"
+    echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    return 1
+  fi
+
+  echo -e "${YELLOW}Checking Homebrew dependencies...${NC}"
+
+  local to_install=()
+  local to_upgrade=()
+
+  for pkg in "${BREW_DEPS[@]}"; do
+    if brew list "$pkg" &>/dev/null; then
+      # Package installed - check if outdated
+      if brew outdated --quiet "$pkg" 2>/dev/null | grep -q "^$pkg$"; then
+        to_upgrade+=("$pkg")
+        echo -e "  ${YELLOW}↑${NC} $pkg (outdated)"
+      else
+        echo -e "  ${GREEN}✓${NC} $pkg (installed)"
+      fi
+    else
+      to_install+=("$pkg")
+      echo -e "  ${RED}✗${NC} $pkg (missing)"
+    fi
+  done
+
+  # Install missing packages
+  if [[ ${#to_install[@]} -gt 0 ]]; then
+    echo -e "${YELLOW}Installing: ${to_install[*]}${NC}"
+    brew install "${to_install[@]}"
+  fi
+
+  # Upgrade outdated packages
+  if [[ ${#to_upgrade[@]} -gt 0 ]]; then
+    echo -e "${YELLOW}Upgrading: ${to_upgrade[*]}${NC}"
+    brew upgrade "${to_upgrade[@]}"
+  fi
+
+  if [[ ${#to_install[@]} -eq 0 ]] && [[ ${#to_upgrade[@]} -eq 0 ]]; then
+    echo -e "${GREEN}All dependencies up to date.${NC}"
+  fi
+
+  echo ""
+}
+
+# ============================================================================
 # CLAUDE SETTINGS DEPLOYMENT
 # ============================================================================
 
@@ -191,6 +245,7 @@ backup_claude_settings() {
     done
     [[ -d "$HOME_CLAUDE_DIR/hooks" ]] && cp -r "$HOME_CLAUDE_DIR/hooks" "$CLAUDE_BACKUP_DIR/"
     [[ -d "$HOME_CLAUDE_DIR/commands" ]] && cp -r "$HOME_CLAUDE_DIR/commands" "$CLAUDE_BACKUP_DIR/"
+    [[ -d "$HOME_CLAUDE_DIR/agents" ]] && cp -r "$HOME_CLAUDE_DIR/agents" "$CLAUDE_BACKUP_DIR/"
     [[ -d "$HOME_CLAUDE_DIR/tools" ]] && cp -r "$HOME_CLAUDE_DIR/tools" "$CLAUDE_BACKUP_DIR/"
 
     echo -e "  ${GREEN}Backup saved to:${NC} $CLAUDE_BACKUP_DIR"
@@ -206,7 +261,7 @@ deploy_claude_settings() {
 
   echo -e "${YELLOW}Deploying Claude settings...${NC}"
 
-  mkdir -p "$HOME_CLAUDE_DIR"/{hooks,commands,tools}
+  mkdir -p "$HOME_CLAUDE_DIR"/{hooks,commands,agents,tools}
 
   # Core files
   for f in CLAUDE.md settings.json statusline.sh; do
@@ -231,6 +286,15 @@ deploy_claude_settings() {
       [[ -f "$f" ]] && cp "$f" "$HOME_CLAUDE_DIR/commands/"
     done
     echo -e "  ${GREEN}Deployed:${NC} ~/.claude/commands/"
+  fi
+
+  # Agents
+  if [[ -d "$LOCAL_CLAUDE_DIR/agents" ]]; then
+    mkdir -p "$HOME_CLAUDE_DIR/agents"
+    for f in "$LOCAL_CLAUDE_DIR/agents"/*; do
+      [[ -f "$f" ]] && cp "$f" "$HOME_CLAUDE_DIR/agents/"
+    done
+    echo -e "  ${GREEN}Deployed:${NC} ~/.claude/agents/"
   fi
 
   # Tools (recursive copy)
@@ -324,6 +388,9 @@ fi
 echo "Local source:  $SCRIPT_DIR"
 echo "Deploy target: $HOME"
 echo ""
+
+# Install/upgrade Homebrew dependencies
+install_dependencies
 
 # Check for remote additions
 if ! check_remote_additions; then
