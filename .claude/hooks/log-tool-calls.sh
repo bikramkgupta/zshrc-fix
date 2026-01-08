@@ -21,7 +21,8 @@
 # 1. The most recent HANDOFF.md file (indicates active subagent)
 # 2. Falls back to "orchestrator" if no active subagent
 
-set -e
+# Note: Deliberately NOT using 'set -e' here - hooks should be resilient
+# and not block Claude operations if logging fails
 
 # Read hook input from stdin
 input=$(cat)

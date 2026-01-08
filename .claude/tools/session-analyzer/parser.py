@@ -477,15 +477,19 @@ def extract_all_content(entry: dict) -> list[dict]:
             })
         elif item_type == "tool_result":
             result_content = item.get("content", "")
+            full_length = 0
             if isinstance(result_content, list):
                 # Handle complex tool results
+                full_length = len(str(result_content))
                 result_content = str(result_content)[:500]
             else:
+                full_length = len(str(result_content))
                 result_content = str(result_content)[:500]
             items.append({
                 "type": "tool_result",
                 "tool_use_id": item.get("tool_use_id", ""),
                 "content": result_content,
+                "full_length": full_length,
                 "is_error": item.get("is_error", False),
                 "timestamp": timestamp,
             })
@@ -537,10 +541,145 @@ def get_first_user_prompt(entries: list[dict]) -> str:
     return ""
 
 
+def extract_cloud_metadata(entries: list[dict]) -> dict:
+    """
+    Extract cloud transmission metadata from session entries.
+
+    Returns stats about tokens, API requests, and what was sent to the cloud.
+    """
+    cloud_stats = {
+        "model": None,
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+        "total_cache_creation_tokens": 0,
+        "total_cache_read_tokens": 0,
+        "api_requests": 0,
+        "request_ids": set(),
+        "message_ids": set(),
+        "service_tier": None,
+    }
+
+    payload_summary = {
+        "files_sent": [],  # List of {path, size_chars, timestamp}
+        "user_prompts": [],  # List of {text, full_length, timestamp}
+        "total_content_chars": 0,
+    }
+
+    seen_files = set()  # Track unique files
+
+    for entry in entries:
+        message = entry.get("message", {})
+        entry_type = entry.get("type", "")
+        timestamp = entry.get("timestamp", "")
+
+        # Extract model and usage from assistant messages
+        if entry_type == "assistant" and isinstance(message, dict):
+            # Model
+            if message.get("model") and not cloud_stats["model"]:
+                cloud_stats["model"] = message["model"]
+
+            # Message ID (Anthropic's)
+            if message.get("id"):
+                cloud_stats["message_ids"].add(message["id"])
+
+            # Usage stats
+            usage = message.get("usage", {})
+            if usage:
+                cloud_stats["total_input_tokens"] += usage.get("input_tokens", 0)
+                cloud_stats["total_output_tokens"] += usage.get("output_tokens", 0)
+                cloud_stats["total_cache_creation_tokens"] += usage.get("cache_creation_input_tokens", 0)
+                cloud_stats["total_cache_read_tokens"] += usage.get("cache_read_input_tokens", 0)
+                if usage.get("service_tier") and not cloud_stats["service_tier"]:
+                    cloud_stats["service_tier"] = usage["service_tier"]
+
+        # Request ID
+        if entry.get("requestId"):
+            cloud_stats["request_ids"].add(entry["requestId"])
+
+        # Track user prompts sent to cloud
+        if entry_type == "user":
+            content = message.get("content", "")
+            if isinstance(content, str) and content.strip():
+                text_preview = content[:200]
+                payload_summary["user_prompts"].append({
+                    "text": text_preview,
+                    "full_length": len(content),
+                    "timestamp": timestamp,
+                })
+                payload_summary["total_content_chars"] += len(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text = item.get("text", "")
+                        if text.strip():
+                            payload_summary["user_prompts"].append({
+                                "text": text[:200],
+                                "full_length": len(text),
+                                "timestamp": timestamp,
+                            })
+                            payload_summary["total_content_chars"] += len(text)
+
+        # Track files read (from tool_result for Read tool)
+        if entry_type == "user":  # Tool results come as user messages
+            content = message.get("content", [])
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "tool_result":
+                        result_content = item.get("content", "")
+                        # Check if this looks like file content (has line numbers from Read tool)
+                        if isinstance(result_content, str) and len(result_content) > 100:
+                            payload_summary["total_content_chars"] += len(result_content)
+
+    # Convert sets to lists for JSON serialization
+    cloud_stats["api_requests"] = len(cloud_stats["request_ids"])
+    cloud_stats["request_ids"] = list(cloud_stats["request_ids"])
+    cloud_stats["message_ids"] = list(cloud_stats["message_ids"])
+
+    # Calculate estimated cost (using approximate public pricing)
+    # Opus: $15/MTok input, $75/MTok output, cache read $1.50/MTok
+    input_cost = (cloud_stats["total_input_tokens"] / 1_000_000) * 15
+    output_cost = (cloud_stats["total_output_tokens"] / 1_000_000) * 75
+    cache_read_cost = (cloud_stats["total_cache_read_tokens"] / 1_000_000) * 1.50
+    cache_create_cost = (cloud_stats["total_cache_creation_tokens"] / 1_000_000) * 18.75  # 25% more than input
+    cloud_stats["estimated_cost_usd"] = round(input_cost + output_cost + cache_read_cost + cache_create_cost, 4)
+
+    return {"cloud_stats": cloud_stats, "payload_summary": payload_summary}
+
+
+def extract_files_from_timeline(timeline: list[dict]) -> list[dict]:
+    """
+    Extract files that were read and sent to cloud from the timeline.
+    """
+    files_sent = []
+    seen_paths = set()
+
+    for event in timeline:
+        if event.get("event") == "tool_use" and event.get("tool_name") == "Read":
+            file_path = event.get("tool_input", {}).get("file_path", "")
+            if file_path and file_path not in seen_paths:
+                seen_paths.add(file_path)
+                result = event.get("tool_result", {})
+                # Use full_length if available, otherwise fall back to content length
+                size = 0
+                if result:
+                    size = result.get("full_length", 0)
+                    if not size:
+                        content = result.get("content", "")
+                        size = len(content) if isinstance(content, str) else 0
+                files_sent.append({
+                    "path": file_path,
+                    "size_chars": size,
+                    "timestamp": event.get("time", ""),
+                })
+
+    return files_sent
+
+
 def build_session_data(main_file: Path, agent_files: list[Path]) -> dict:
     """
     Build unified session data from main and agent transcripts.
     Now extracts full trace: thinking, text, tool_use, tool_result.
+    Also extracts cloud transmission metadata.
     """
     main_entries = parse_jsonl(main_file)
 
@@ -561,6 +700,9 @@ def build_session_data(main_file: Path, agent_files: list[Path]) -> dict:
                 end_time = ts
         if not project and entry.get("cwd"):
             project = entry["cwd"]
+
+    # Extract cloud metadata from main entries
+    cloud_data = extract_cloud_metadata(main_entries)
 
     # Build main agent trace
     main_trace = []
@@ -743,6 +885,32 @@ def build_session_data(main_file: Path, agent_files: list[Path]) -> dict:
     for e in timeline:
         event_counts[e["event"]] = event_counts.get(e["event"], 0) + 1
 
+    # Extract files sent to cloud from timeline
+    files_sent = extract_files_from_timeline(timeline)
+    cloud_data["payload_summary"]["files_sent"] = files_sent
+
+    # Also extract cloud metadata from agent files
+    for agent_file in agent_files:
+        agent_entries = parse_jsonl(agent_file)
+        agent_cloud = extract_cloud_metadata(agent_entries)
+        # Merge agent cloud stats
+        cloud_data["cloud_stats"]["total_input_tokens"] += agent_cloud["cloud_stats"]["total_input_tokens"]
+        cloud_data["cloud_stats"]["total_output_tokens"] += agent_cloud["cloud_stats"]["total_output_tokens"]
+        cloud_data["cloud_stats"]["total_cache_creation_tokens"] += agent_cloud["cloud_stats"]["total_cache_creation_tokens"]
+        cloud_data["cloud_stats"]["total_cache_read_tokens"] += agent_cloud["cloud_stats"]["total_cache_read_tokens"]
+        cloud_data["cloud_stats"]["request_ids"].extend(agent_cloud["cloud_stats"]["request_ids"])
+        cloud_data["cloud_stats"]["message_ids"].extend(agent_cloud["cloud_stats"]["message_ids"])
+        cloud_data["payload_summary"]["total_content_chars"] += agent_cloud["payload_summary"]["total_content_chars"]
+
+    # Recalculate cost with agent data included
+    cs = cloud_data["cloud_stats"]
+    input_cost = (cs["total_input_tokens"] / 1_000_000) * 15
+    output_cost = (cs["total_output_tokens"] / 1_000_000) * 75
+    cache_read_cost = (cs["total_cache_read_tokens"] / 1_000_000) * 1.50
+    cache_create_cost = (cs["total_cache_creation_tokens"] / 1_000_000) * 18.75
+    cs["estimated_cost_usd"] = round(input_cost + output_cost + cache_read_cost + cache_create_cost, 4)
+    cs["api_requests"] = len(set(cs["request_ids"]))
+
     return {
         "session": {
             "id": session_id,
@@ -754,6 +922,8 @@ def build_session_data(main_file: Path, agent_files: list[Path]) -> dict:
         },
         "agents": agents,
         "timeline": timeline,
+        "cloud_stats": cloud_data["cloud_stats"],
+        "payload_summary": cloud_data["payload_summary"],
         "stats": {
             "total_agents": len(agents),
             "skipped_warmup": skipped_warmup,
@@ -859,6 +1029,43 @@ def generate_html(data: dict, all_sessions: list[dict] = None) -> str:
         }}
         .stat-value {{ font-size: 1.3em; font-weight: bold; color: #e94560; }}
         .stat-label {{ font-size: 0.75em; color: #888; }}
+        .cloud-section {{
+            background: #0a1628;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 15px;
+            border-left: 3px solid #4da8da;
+        }}
+        .cloud-section h3 {{
+            color: #4da8da;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .cloud-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }}
+        .cloud-stat {{
+            background: #16213e;
+            padding: 8px 12px;
+            border-radius: 4px;
+        }}
+        .cloud-stat-value {{
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #4da8da;
+        }}
+        .cloud-stat-label {{
+            font-size: 0.7em;
+            color: #666;
+        }}
+        .cost-highlight {{
+            color: #fbbf24;
+        }}
         .filter-bar {{
             margin-bottom: 15px;
             display: flex;
@@ -1049,6 +1256,58 @@ def generate_html(data: dict, all_sessions: list[dict] = None) -> str:
         .tree-item-content {{ margin-top: 4px; color: #aaa; font-size: 0.9em; }}
         .expand-icon {{ transition: transform 0.2s; display: inline-block; margin-right: 8px; }}
         .tree-agent.expanded .expand-icon {{ transform: rotate(90deg); }}
+
+        /* Payload View */
+        .payload {{ padding: 10px; max-width: 1200px; }}
+        .payload-section {{
+            background: #16213e;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }}
+        .payload-section-header {{
+            padding: 12px 15px;
+            background: #0f3460;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .payload-section-content {{
+            padding: 15px;
+        }}
+        .payload-file {{
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #0a1628;
+            border-radius: 4px;
+            margin-bottom: 6px;
+            font-family: monospace;
+            font-size: 0.85em;
+        }}
+        .payload-file-path {{ color: #4da8da; word-break: break-all; }}
+        .payload-file-size {{ color: #888; white-space: nowrap; margin-left: 10px; }}
+        .payload-prompt {{
+            padding: 10px 12px;
+            background: #1e3a5f;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            border-left: 3px solid #3b82f6;
+        }}
+        .payload-prompt-text {{
+            color: #ddd;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }}
+        .payload-prompt-meta {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75em;
+            color: #666;
+            margin-top: 6px;
+        }}
     </style>
 </head>
 <body>
@@ -1095,6 +1354,44 @@ def generate_html(data: dict, all_sessions: list[dict] = None) -> str:
                 <div class="stat-label">Lifecycle</div>
             </div>
         </div>
+
+        <div class="cloud-section">
+            <h3>Cloud Transmission</h3>
+            <div class="cloud-grid">
+                <div class="cloud-stat">
+                    <div class="cloud-stat-value">{model_short}</div>
+                    <div class="cloud-stat-label">Model</div>
+                </div>
+                <div class="cloud-stat">
+                    <div class="cloud-stat-value">{api_requests}</div>
+                    <div class="cloud-stat-label">API Requests</div>
+                </div>
+                <div class="cloud-stat">
+                    <div class="cloud-stat-value">{input_tokens_fmt}</div>
+                    <div class="cloud-stat-label">Input Tokens</div>
+                </div>
+                <div class="cloud-stat">
+                    <div class="cloud-stat-value">{output_tokens_fmt}</div>
+                    <div class="cloud-stat-label">Output Tokens</div>
+                </div>
+                <div class="cloud-stat">
+                    <div class="cloud-stat-value">{cache_read_fmt}</div>
+                    <div class="cloud-stat-label">Cache Read</div>
+                </div>
+                <div class="cloud-stat">
+                    <div class="cloud-stat-value">{cache_create_fmt}</div>
+                    <div class="cloud-stat-label">Cache Create</div>
+                </div>
+                <div class="cloud-stat">
+                    <div class="cloud-stat-value cost-highlight">${estimated_cost}</div>
+                    <div class="cloud-stat-label">Est. Cost</div>
+                </div>
+                <div class="cloud-stat">
+                    <div class="cloud-stat-value">{files_sent_count}</div>
+                    <div class="cloud-stat-label">Files Sent</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="filter-bar">
@@ -1121,6 +1418,7 @@ def generate_html(data: dict, all_sessions: list[dict] = None) -> str:
     <div class="tabs">
         <button class="tab active" data-view="timeline">Timeline</button>
         <button class="tab" data-view="tree">Tree</button>
+        <button class="tab" data-view="payload">Payload</button>
     </div>
 
     <div id="timeline" class="view active">
@@ -1129,6 +1427,10 @@ def generate_html(data: dict, all_sessions: list[dict] = None) -> str:
 
     <div id="tree" class="view">
         <div class="tree"></div>
+    </div>
+
+    <div id="payload" class="view">
+        <div class="payload"></div>
     </div>
 
     <script>
@@ -1368,6 +1670,74 @@ def generate_html(data: dict, all_sessions: list[dict] = None) -> str:
             }});
         }}
 
+        function renderPayload() {{
+            const container = document.querySelector('.payload');
+            const payload = data.payload_summary || {{}};
+            const filesSent = payload.files_sent || [];
+            const userPrompts = payload.user_prompts || [];
+
+            let html = '';
+
+            // Files section
+            html += '<div class="payload-section">';
+            html += '<div class="payload-section-header">';
+            html += '<span>Files Sent to Cloud (' + filesSent.length + ')</span>';
+            html += '<span style="color:#888;font-size:0.85em;">Content read and transmitted</span>';
+            html += '</div>';
+            html += '<div class="payload-section-content">';
+
+            if (filesSent.length === 0) {{
+                html += '<p style="color:#666;">No files read during this session</p>';
+            }} else {{
+                filesSent.forEach(file => {{
+                    const sizeKb = (file.size_chars / 1024).toFixed(1);
+                    html += '<div class="payload-file">';
+                    html += '<span class="payload-file-path">' + escapeHtml(file.path) + '</span>';
+                    html += '<span class="payload-file-size">' + file.size_chars.toLocaleString() + ' chars (' + sizeKb + ' KB) @ ' + formatTime(file.timestamp) + '</span>';
+                    html += '</div>';
+                }});
+            }}
+            html += '</div></div>';
+
+            // User prompts section
+            html += '<div class="payload-section">';
+            html += '<div class="payload-section-header">';
+            html += '<span>User Prompts (' + userPrompts.length + ')</span>';
+            html += '<span style="color:#888;font-size:0.85em;">Your messages sent to API</span>';
+            html += '</div>';
+            html += '<div class="payload-section-content">';
+
+            if (userPrompts.length === 0) {{
+                html += '<p style="color:#666;">No user prompts found</p>';
+            }} else {{
+                userPrompts.forEach((prompt, idx) => {{
+                    html += '<div class="payload-prompt">';
+                    html += '<div class="payload-prompt-text">' + escapeHtml(prompt.text) + (prompt.full_length > 200 ? '...' : '') + '</div>';
+                    html += '<div class="payload-prompt-meta">';
+                    html += '<span>#' + (idx + 1) + ' - ' + prompt.full_length.toLocaleString() + ' chars</span>';
+                    html += '<span>' + formatTime(prompt.timestamp) + '</span>';
+                    html += '</div></div>';
+                }});
+            }}
+            html += '</div></div>';
+
+            // Summary
+            const totalChars = payload.total_content_chars || 0;
+            const totalKb = (totalChars / 1024).toFixed(1);
+            html += '<div class="payload-section">';
+            html += '<div class="payload-section-header">';
+            html += '<span>Transmission Summary</span>';
+            html += '</div>';
+            html += '<div class="payload-section-content" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;">';
+            html += '<div class="cloud-stat"><div class="cloud-stat-value">' + totalChars.toLocaleString() + '</div><div class="cloud-stat-label">Total Characters</div></div>';
+            html += '<div class="cloud-stat"><div class="cloud-stat-value">' + totalKb + ' KB</div><div class="cloud-stat-label">Approx Size</div></div>';
+            html += '<div class="cloud-stat"><div class="cloud-stat-value">' + filesSent.length + '</div><div class="cloud-stat-label">Files Read</div></div>';
+            html += '<div class="cloud-stat"><div class="cloud-stat-value">' + userPrompts.length + '</div><div class="cloud-stat-label">User Messages</div></div>';
+            html += '</div></div>';
+
+            container.innerHTML = html;
+        }}
+
         // Tab switching
         document.querySelectorAll('.tab').forEach(tab => {{
             tab.addEventListener('click', function() {{
@@ -1391,12 +1761,35 @@ def generate_html(data: dict, all_sessions: list[dict] = None) -> str:
         // Initial render
         renderTimeline();
         renderTree();
+        renderPayload();
     </script>
 </body>
 </html>'''
 
     # Calculate lifecycle count (lifecycle + post_tool_use events)
     lifecycle_count = event_counts.get("lifecycle", 0) + event_counts.get("post_tool_use", 0)
+
+    # Extract cloud stats
+    cloud_stats = data.get("cloud_stats", {})
+    payload_summary = data.get("payload_summary", {})
+
+    # Format token numbers for display
+    def format_tokens(n):
+        if n >= 1_000_000:
+            return f"{n/1_000_000:.1f}M"
+        elif n >= 1_000:
+            return f"{n/1_000:.1f}K"
+        return str(n)
+
+    # Get model short name
+    model = cloud_stats.get("model", "unknown") or "unknown"
+    model_short = model.split("-")[-1] if model != "unknown" else "N/A"
+    if "opus" in model.lower():
+        model_short = "Opus 4.5"
+    elif "sonnet" in model.lower():
+        model_short = "Sonnet"
+    elif "haiku" in model.lower():
+        model_short = "Haiku"
 
     return html_template.format(
         session_id_short=session_id_short,
@@ -1410,7 +1803,15 @@ def generate_html(data: dict, all_sessions: list[dict] = None) -> str:
         text_count=event_counts.get("text", 0),
         lifecycle_count=lifecycle_count,
         json_str=json_str,
-        sessions_json=sessions_json
+        sessions_json=sessions_json,
+        model_short=model_short,
+        api_requests=cloud_stats.get("api_requests", 0),
+        input_tokens_fmt=format_tokens(cloud_stats.get("total_input_tokens", 0)),
+        output_tokens_fmt=format_tokens(cloud_stats.get("total_output_tokens", 0)),
+        cache_read_fmt=format_tokens(cloud_stats.get("total_cache_read_tokens", 0)),
+        cache_create_fmt=format_tokens(cloud_stats.get("total_cache_creation_tokens", 0)),
+        estimated_cost=f"{cloud_stats.get('estimated_cost_usd', 0):.2f}",
+        files_sent_count=len(payload_summary.get("files_sent", [])),
     )
 
 
@@ -1431,6 +1832,23 @@ def generate_digest(data: dict) -> str:
     lines.append(f"**Duration:** {session.get('duration_mins', '?')} minutes")
     lines.append(f"**Agents:** {stats.get('total_agents', 0)} ({', '.join(a['type'] for a in agents[:5])})")
     lines.append("")
+
+    # Cloud transmission summary
+    cloud_stats = data.get("cloud_stats", {})
+    payload_summary = data.get("payload_summary", {})
+    if cloud_stats.get("model"):
+        lines.append("## Cloud Transmission Summary")
+        lines.append("")
+        lines.append(f"- **Model:** {cloud_stats.get('model', 'unknown')}")
+        lines.append(f"- **API Requests:** {cloud_stats.get('api_requests', 0)}")
+        total_input = cloud_stats.get('total_input_tokens', 0)
+        total_output = cloud_stats.get('total_output_tokens', 0)
+        lines.append(f"- **Total Tokens:** {total_input:,} input / {total_output:,} output")
+        lines.append(f"- **Estimated Cost:** ${cloud_stats.get('estimated_cost_usd', 0):.2f}")
+        files_sent = payload_summary.get("files_sent", [])
+        total_chars = payload_summary.get("total_content_chars", 0)
+        lines.append(f"- **Files Sent:** {len(files_sent)} files ({total_chars:,} chars)")
+        lines.append("")
 
     # User prompts
     user_prompts = [e for e in timeline if e.get("event") == "user" and e.get("text")]
@@ -1564,6 +1982,80 @@ def format_session_list(sessions: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def format_cloud_stats(data: dict) -> str:
+    """Format cloud transmission stats for terminal display."""
+    session = data.get("session", {})
+    cloud_stats = data.get("cloud_stats", {})
+
+    session_id = session.get("id", "unknown")[:8]
+    model = cloud_stats.get("model", "unknown") or "unknown"
+
+    lines = []
+    lines.append(f"Session: {session_id}")
+    lines.append(f"Model: {model}")
+    lines.append(f"API Requests: {cloud_stats.get('api_requests', 0)}")
+    lines.append("")
+    lines.append("Tokens:")
+    lines.append(f"  Input: {cloud_stats.get('total_input_tokens', 0):,}")
+    lines.append(f"  Output: {cloud_stats.get('total_output_tokens', 0):,}")
+    lines.append(f"  Cache Creation: {cloud_stats.get('total_cache_creation_tokens', 0):,}")
+    lines.append(f"  Cache Read: {cloud_stats.get('total_cache_read_tokens', 0):,}")
+    lines.append("")
+    lines.append(f"Estimated Cost: ${cloud_stats.get('estimated_cost_usd', 0):.4f}")
+    lines.append(f"Service Tier: {cloud_stats.get('service_tier', 'unknown')}")
+
+    return "\n".join(lines)
+
+
+def format_payload(data: dict) -> str:
+    """Format payload summary for terminal display."""
+    payload = data.get("payload_summary", {})
+    files_sent = payload.get("files_sent", [])
+    user_prompts = payload.get("user_prompts", [])
+
+    lines = []
+
+    # Files section
+    lines.append(f"Files sent to cloud ({len(files_sent)}):")
+    if files_sent:
+        for f in files_sent:
+            path = f.get("path", "unknown")
+            size = f.get("size_chars", 0)
+            timestamp = f.get("timestamp", "")
+            time_str = ""
+            if timestamp:
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    time_str = f" @ {dt.strftime('%H:%M:%S')}"
+                except:
+                    pass
+            lines.append(f"  - {path} ({size:,} chars){time_str}")
+    else:
+        lines.append("  (none)")
+
+    lines.append("")
+
+    # User prompts section
+    lines.append(f"User prompts ({len(user_prompts)}):")
+    if user_prompts:
+        for i, p in enumerate(user_prompts, 1):
+            text = p.get("text", "")[:80].replace("\n", " ")
+            full_len = p.get("full_length", 0)
+            if len(p.get("text", "")) > 80:
+                text += "..."
+            lines.append(f"  {i}. \"{text}\" ({full_len:,} chars)")
+    else:
+        lines.append("  (none)")
+
+    lines.append("")
+
+    # Summary
+    total_chars = payload.get("total_content_chars", 0)
+    lines.append(f"Total content: {total_chars:,} chars ({total_chars / 1024:.1f} KB)")
+
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Claude Code Session Analyzer")
     parser.add_argument("session_id", nargs="?", help="Session ID to analyze")
@@ -1574,6 +2066,10 @@ def main():
                         help="Output format (default: html)")
     parser.add_argument("--digest", action="store_true",
                         help="Generate markdown digest for follow-up in new session")
+    parser.add_argument("--cloud-stats", action="store_true",
+                        help="Show cloud transmission summary (tokens, cost, API requests)")
+    parser.add_argument("--payload", action="store_true",
+                        help="Show what content was sent to the cloud (files, prompts)")
     parser.add_argument("--open", action="store_true", help="Open HTML in browser")
     parser.add_argument("--out-file", help="Write output to file instead of stdout")
 
@@ -1611,7 +2107,11 @@ def main():
         except:
             pass  # Session list is optional
 
-        if args.digest:
+        if args.cloud_stats:
+            output = format_cloud_stats(data)
+        elif args.payload:
+            output = format_payload(data)
+        elif args.digest:
             output = generate_digest(data)
         elif args.output == "json":
             output = json.dumps(data, indent=2)
